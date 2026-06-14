@@ -7,7 +7,6 @@ from folium import plugins
 from streamlit_folium import st_folium
 import streamlit as st
 from typing import List, Dict, Optional, Tuple
-import random
 
 
 class MapService:
@@ -16,6 +15,30 @@ class MapService:
     def __init__(self):
         self.pakistan_center = [30.3753, 69.3451]
         self.default_zoom = 6
+        
+        # City coordinates for major locations
+        self.city_coords = {
+            "Karachi": (24.8607, 67.0011),
+            "Lahore": (31.5204, 74.3587),
+            "Islamabad": (33.6844, 73.0479),
+            "Rawalpindi": (33.5651, 73.0169),
+            "Peshawar": (34.0151, 71.5249),
+            "Quetta": (30.1798, 66.9750),
+            "Multan": (30.1575, 71.5249),
+            "Faisalabad": (31.4504, 73.1350),
+            "Gujranwala": (32.1877, 74.1945),
+            "Sialkot": (32.4945, 74.5229),
+            "Hyderabad": (25.3960, 68.3578),
+            "Sukkur": (27.7244, 68.8428),
+            "Bahawalpur": (29.3956, 71.6837),
+            "Sargodha": (32.0855, 72.6744),
+            "Abbottabad": (34.1688, 73.2215),
+            "Mardan": (34.1989, 72.0497),
+        }
+    
+    def get_city_coordinates(self, city: str) -> Optional[Tuple]:
+        """Get coordinates for a city"""
+        return self.city_coords.get(city, (30.3753, 69.3451))
     
     def create_base_map(self, center: Optional[Tuple] = None, zoom: int = None):
         """Create a base map"""
@@ -34,26 +57,10 @@ class MapService:
         
         return m
     
-    def create_full_dashboard_map(self, incidents: List[Dict], units: List[Dict] = None,
-                                   show_heatmap: bool = True, show_clusters: bool = False):
-        """Create a complete dashboard map"""
-        m = self.create_base_map()
-        
-        # Add incident markers
-        for inc in incidents[:100]:  # Limit to 100 for performance
-            self._add_incident_marker(m, inc)
-        
-        # Add unit markers
-        if units:
-            for unit in units[:50]:  # Limit units
-                self._add_unit_marker(m, unit)
-        
-        return m
-    
-    def _add_incident_marker(self, map_obj, incident: Dict):
+    def add_incident_marker(self, map_obj, incident: Dict):
         """Add an incident marker to the map"""
         city = incident.get('city', '')
-        coords = self._get_city_coordinates(city)
+        coords = self.get_city_coordinates(city)
         
         if not coords:
             return
@@ -92,10 +99,10 @@ class MapService:
             icon=folium.Icon(color=color, icon='info-sign', prefix='glyphicon')
         ).add_to(map_obj)
     
-    def _add_unit_marker(self, map_obj, unit: Dict):
+    def add_unit_marker(self, map_obj, unit: Dict):
         """Add a unit marker to the map"""
         city = unit.get('city', '')
-        coords = self._get_city_coordinates(city)
+        coords = self.get_city_coordinates(city)
         
         if not coords:
             return
@@ -120,29 +127,83 @@ class MapService:
             icon=folium.Icon(color=color, icon='home', prefix='glyphicon')
         ).add_to(map_obj)
     
-    def _get_city_coordinates(self, city: str) -> Optional[Tuple]:
-        """Get coordinates for a city"""
-        # Simple coordinate mapping for major cities
-        coords = {
-            "Karachi": (24.8607, 67.0011),
-            "Lahore": (31.5204, 74.3587),
-            "Islamabad": (33.6844, 73.0479),
-            "Rawalpindi": (33.5651, 73.0169),
-            "Peshawar": (34.0151, 71.5249),
-            "Quetta": (30.1798, 66.9750),
-            "Multan": (30.1575, 71.5249),
-            "Faisalabad": (31.4504, 73.1350),
-            "Gujranwala": (32.1877, 74.1945),
-            "Sialkot": (32.4945, 74.5229),
-            "Hyderabad": (25.3960, 68.3578),
-            "Sukkur": (27.7244, 68.8428),
+    def add_route_line(self, map_obj, from_city: str, to_city: str, color: str = 'blue'):
+        """Add a route line between two cities"""
+        from_coords = self.get_city_coordinates(from_city)
+        to_coords = self.get_city_coordinates(to_city)
+        
+        if not from_coords or not to_coords:
+            return
+        
+        folium.PolyLine(
+            locations=[from_coords, to_coords],
+            color=color,
+            weight=3,
+            opacity=0.7,
+            popup=f"Route: {from_city} → {to_city}"
+        ).add_to(map_obj)
+    
+    def create_full_dashboard_map(self, incidents: List[Dict], units: List[Dict] = None,
+                                   show_heatmap: bool = True, show_clusters: bool = False):
+        """Create a complete dashboard map"""
+        m = self.create_base_map()
+        
+        # Add incident markers
+        for inc in incidents[:100]:
+            self.add_incident_marker(m, inc)
+        
+        # Add unit markers
+        if units:
+            for unit in units[:50]:
+                self.add_unit_marker(m, unit)
+        
+        return m
+    
+    def create_unit_deployment_map(self, unit_id: str, destination: str, route_data: Dict = None):
+        """Create a map showing unit deployment route"""
+        from ai.router import Router
+        router = Router()
+        
+        unit = next((u for u in router.units if u['id'] == unit_id), None)
+        if not unit or not destination:
+            return None
+        
+        m = self.create_base_map()
+        
+        # Add unit marker
+        self.add_unit_marker(m, unit)
+        
+        # Add destination marker
+        dest_incident = {
+            'city': destination, 
+            'category': 'Emergency', 
+            'priority': 85, 
+            'level': 'High', 
+            'status': 'Pending', 
+            'id': 'DEST',
+            'unit': unit_id,
+            'eta': 0
         }
-        return coords.get(city)
+        self.add_incident_marker(m, dest_incident)
+        
+        # Add route line
+        self.add_route_line(m, unit['city'], destination, 'red')
+        
+        # Fit bounds to show entire route
+        from_coords = self.get_city_coordinates(unit['city'])
+        to_coords = self.get_city_coordinates(destination)
+        if from_coords and to_coords:
+            bounds = [from_coords, to_coords]
+            m.fit_bounds(bounds, padding=(50, 50))
+        
+        return m
     
     def display_map(self, map_obj, height: int = 500):
         """Display the map in Streamlit"""
         if map_obj:
             st_folium(map_obj, width="100%", height=height, returned_objects=[])
+        else:
+            st.info("No map data available")
 
 
 # Singleton instance
