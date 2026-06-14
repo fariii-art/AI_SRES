@@ -2,62 +2,40 @@
 ai/priority.py — Priority scoring engine
 """
 
-import re
+from utils import CATEGORY_BASE_WEIGHTS, CRITICAL_KEYWORDS, MULTI_VICTIM_KEYWORDS, NIGHT_PENALTY
 
 
 class PriorityEngine:
-    """Calculate emergency priority scores (0-100)"""
+    def __init__(self):
+        self.base_weights = CATEGORY_BASE_WEIGHTS.copy()
+        self.critical_keywords = CRITICAL_KEYWORDS
+        self.multi_victim_keywords = MULTI_VICTIM_KEYWORDS
+        self.night_penalty = NIGHT_PENALTY
     
-    BASE_WEIGHTS = {
-        "Fire": 42,
-        "Accident": 35,
-        "Medical": 50,
-        "Crime": 45,
-        "Flood": 40,
-        "Earthquake": 48
-    }
-    
-    CRITICAL_KEYWORDS = [
-        "critical", "emergency", "urgent", "life threatening", "death",
-        "unconscious", "bleeding", "heart attack", "stroke", "explosion",
-        "shooting", "hostage", "آگ", "خون", "دھماکہ", "فائرنگ", "بے ہوش"
-    ]
-    
-    MULTI_VICTIM = ["multiple", "many", "several", "crowd", "10", "20", "30"]
-    NIGHT_PENALTY = 15
-    
-    def score(self, category: str, description: str, confidence: float, time_of_day: str = "Day") -> tuple:
-        """Calculate priority score and level"""
+    def score(self, category: str, description: str, confidence: float, time_of_day: str = "Day"):
+        base = self.base_weights.get(category, 30)
         
-        # Base score
-        base = self.BASE_WEIGHTS.get(category, 30)
-        
-        # Critical keyword boost
         keyword_boost = 0
         desc_lower = description.lower()
-        for kw in self.CRITICAL_KEYWORDS:
-            if kw in desc_lower:
-                keyword_boost += 5
+        
+        for lang in self.critical_keywords:
+            for kw in self.critical_keywords[lang]:
+                if kw in desc_lower:
+                    keyword_boost += 5
         keyword_boost = min(keyword_boost, 25)
         
-        # Multi-victim boost
         victim_boost = 0
-        for kw in self.MULTI_VICTIM:
+        for kw in self.multi_victim_keywords:
             if kw in desc_lower:
                 victim_boost += 10
         victim_boost = min(victim_boost, 20)
         
-        # Confidence boost
         confidence_boost = int(confidence * 10)
+        night_penalty = self.night_penalty if time_of_day == "Night" else 0
         
-        # Night penalty
-        night_penalty = self.NIGHT_PENALTY if time_of_day == "Night" else 0
-        
-        # Calculate final score
         score = base + keyword_boost + victim_boost + confidence_boost + night_penalty
         score = min(score, 100)
         
-        # Determine level
         if score >= 80:
             level = "Critical"
         elif score >= 60:
