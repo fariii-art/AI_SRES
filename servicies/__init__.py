@@ -1,6 +1,7 @@
-
 """
-Utils package for SERS
+Services package for SERS
 """
 
-from .constants import *
+from .map_service import map_service
+
+__all__ = ['map_service']
