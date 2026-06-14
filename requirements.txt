@@ -6,3 +6,6 @@ plotly==5.18.0
 folium==0.15.1
 streamlit-folium==0.15.0
 requests==2.31.0
+torch==2.0.1
+transformers==4.35.0
+sentencepiece==0.1.99
