@@ -1,5 +1,6 @@
 """
-database.py — SQLite persistence layer with user management
+database.py — SQLite persistence layer for SERS
+Manages incidents, users, and all data persistence
 """
 
 import sqlite3
@@ -11,7 +12,7 @@ DB_PATH = "sers.db"
 
 
 def get_conn():
-    """Get database connection"""
+    """Get database connection with row factory"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -58,7 +59,7 @@ def init_db():
         )
     """)
     
-    # Insert default users if not exists
+    # Insert default users
     default_users = [
         ("reporter", hashlib.sha256("rep123".encode()).hexdigest(), "Reporter", "Civilian Reporter", "+923001234567"),
         ("operator", hashlib.sha256("op123".encode()).hexdigest(), "Operator", "Emergency Operator", "+923001234568"),
@@ -101,13 +102,18 @@ def insert_incident(reporter, city, description, category, confidence,
     """Insert new incident"""
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_conn()
+    
     cur = conn.execute("""
-        INSERT INTO incidents
-        (timestamp, reporter, city, description, category,
-         confidence, priority, level, unit, eta, route, status, phone, latitude, longitude)
+        INSERT INTO incidents (
+            timestamp, reporter, city, description, category,
+            confidence, priority, level, unit, eta, route, status,
+            phone, latitude, longitude
+        )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?, ?)
     """, (ts, reporter, city, description, category,
-          round(confidence, 2), priority, level, unit, eta, route, phone, lat, lon))
+          round(confidence, 2), priority, level, unit, eta, route,
+          phone, lat, lon))
+    
     conn.commit()
     row_id = cur.lastrowid
     conn.close()
@@ -147,6 +153,7 @@ def update_status(incident_id, new_status):
     """Update incident status"""
     conn = get_conn()
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     if new_status == "Dispatched":
         conn.execute(
             "UPDATE incidents SET status=?, dispatched_at=? WHERE id=?",
@@ -162,6 +169,7 @@ def update_status(incident_id, new_status):
             "UPDATE incidents SET status=? WHERE id=?",
             (new_status, incident_id)
         )
+    
     conn.commit()
     conn.close()
 
