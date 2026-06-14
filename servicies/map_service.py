@@ -30,10 +30,6 @@ class MapService:
             "Sialkot": (32.4945, 74.5229),
             "Hyderabad": (25.3960, 68.3578),
             "Sukkur": (27.7244, 68.8428),
-            "Bahawalpur": (29.3956, 71.6837),
-            "Sargodha": (32.0855, 72.6744),
-            "Abbottabad": (34.1688, 73.2215),
-            "Mardan": (34.1989, 72.0497),
         }
     
     def get_city_coordinates(self, city: str) -> Optional[Tuple]:
@@ -69,16 +65,12 @@ class MapService:
         priority = incident.get('priority', 50)
         if priority >= 80:
             color = 'red'
-            icon = '🔥'
         elif priority >= 60:
             color = 'orange'
-            icon = '⚠️'
         elif priority >= 40:
             color = 'yellow'
-            icon = '📋'
         else:
             color = 'green'
-            icon = 'ℹ️'
         
         popup_text = f"""
         <div style="font-family: Arial; min-width: 200px;">
@@ -127,22 +119,6 @@ class MapService:
             icon=folium.Icon(color=color, icon='home', prefix='glyphicon')
         ).add_to(map_obj)
     
-    def add_route_line(self, map_obj, from_city: str, to_city: str, color: str = 'blue'):
-        """Add a route line between two cities"""
-        from_coords = self.get_city_coordinates(from_city)
-        to_coords = self.get_city_coordinates(to_city)
-        
-        if not from_coords or not to_coords:
-            return
-        
-        folium.PolyLine(
-            locations=[from_coords, to_coords],
-            color=color,
-            weight=3,
-            opacity=0.7,
-            popup=f"Route: {from_city} → {to_city}"
-        ).add_to(map_obj)
-    
     def create_full_dashboard_map(self, incidents: List[Dict], units: List[Dict] = None,
                                    show_heatmap: bool = True, show_clusters: bool = False):
         """Create a complete dashboard map"""
@@ -161,42 +137,35 @@ class MapService:
     
     def create_unit_deployment_map(self, unit_id: str, destination: str, route_data: Dict = None):
         """Create a map showing unit deployment route"""
-        from ai.router import Router
-        router = Router()
-        
-        unit = next((u for u in router.units if u['id'] == unit_id), None)
-        if not unit or not destination:
+        try:
+            from ai.router import Router
+            router = Router()
+            
+            unit = next((u for u in router.units if u['id'] == unit_id), None)
+            if not unit or not destination:
+                return None
+            
+            m = self.create_base_map()
+            
+            # Add unit marker
+            self.add_unit_marker(m, unit)
+            
+            # Add destination marker
+            dest_incident = {
+                'city': destination, 
+                'category': 'Emergency', 
+                'priority': 85, 
+                'level': 'High', 
+                'status': 'Pending', 
+                'id': 'DEST',
+                'unit': unit_id,
+                'eta': 0
+            }
+            self.add_incident_marker(m, dest_incident)
+            
+            return m
+        except:
             return None
-        
-        m = self.create_base_map()
-        
-        # Add unit marker
-        self.add_unit_marker(m, unit)
-        
-        # Add destination marker
-        dest_incident = {
-            'city': destination, 
-            'category': 'Emergency', 
-            'priority': 85, 
-            'level': 'High', 
-            'status': 'Pending', 
-            'id': 'DEST',
-            'unit': unit_id,
-            'eta': 0
-        }
-        self.add_incident_marker(m, dest_incident)
-        
-        # Add route line
-        self.add_route_line(m, unit['city'], destination, 'red')
-        
-        # Fit bounds to show entire route
-        from_coords = self.get_city_coordinates(unit['city'])
-        to_coords = self.get_city_coordinates(destination)
-        if from_coords and to_coords:
-            bounds = [from_coords, to_coords]
-            m.fit_bounds(bounds, padding=(50, 50))
-        
-        return m
     
     def display_map(self, map_obj, height: int = 500):
         """Display the map in Streamlit"""
