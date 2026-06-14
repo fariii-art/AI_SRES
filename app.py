@@ -1,17 +1,16 @@
 """
 app.py — SERS Smart Emergency Response System
-Complete with XLM-RoBERTa AI, OSRM Routing, Voice Recognition, and Three Dashboards
+Complete with Login System, Three Dashboards, and Interactive Maps
 """
 
 import streamlit as st
 import pandas as pd
 import datetime
-import plotly.express as px
 import json
 
 # Import modules
 from database import (
-    init_db, verify_user, get_user_by_username,
+    init_db, verify_user,
     insert_incident, get_all_incidents, get_incidents_by_reporter,
     update_status, get_pending_incidents, get_stats,
     get_all_users, create_user, delete_user
@@ -19,7 +18,13 @@ from database import (
 from ai.model import EmergencyModel
 from ai.priority import PriorityEngine
 from ai.router import Router
-from services.map_service import map_service
+
+# Try to import map service (optional)
+try:
+    from services.map_service import map_service
+    MAP_AVAILABLE = True
+except ImportError:
+    MAP_AVAILABLE = False
 
 # Page config
 st.set_page_config(
@@ -29,7 +34,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize
+# Initialize database
 init_db()
 
 # Load models
@@ -42,10 +47,67 @@ def load_models():
 
 model, priority_engine, router = load_models()
 
+# Custom CSS
+st.markdown("""
+<style>
+    .stApp {
+        background: linear-gradient(135deg, #1e3a5f 0%, #0f2b45 100%);
+    }
+    .main-header {
+        text-align: center;
+        color: white;
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+    .sub-header {
+        text-align: center;
+        color: rgba(255,255,255,0.8);
+        margin-bottom: 2rem;
+    }
+    .priority-critical { background: #dc2626; padding: 4px 12px; border-radius: 20px; color: white; display: inline-block; font-weight: bold; font-size: 12px; }
+    .priority-high { background: #f97316; padding: 4px 12px; border-radius: 20px; color: white; display: inline-block; font-weight: bold; font-size: 12px; }
+    .priority-medium { background: #eab308; padding: 4px 12px; border-radius: 20px; color: white; display: inline-block; font-weight: bold; font-size: 12px; }
+    .priority-low { background: #22c55e; padding: 4px 12px; border-radius: 20px; color: white; display: inline-block; font-weight: bold; font-size: 12px; }
+    .stButton > button {
+        background: linear-gradient(135deg, #ff416c, #ff4b2b);
+        color: white;
+        border-radius: 40px;
+        font-weight: 600;
+    }
+    .stMetric {
+        background: rgba(255,255,255,0.1);
+        border-radius: 16px;
+        padding: 10px;
+    }
+    .stSidebar {
+        background: rgba(0,0,0,0.3) !important;
+        backdrop-filter: blur(10px);
+    }
+    .login-container {
+        background: rgba(255,255,255,0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        padding: 2rem;
+        max-width: 400px;
+        margin: 0 auto;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# ==================== VOICE RECOGNITION COMPONENT ====================
+# Session state
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'user' not in st.session_state:
+    st.session_state.user = None
+if 'role' not in st.session_state:
+    st.session_state.role = None
+if 'voice_text' not in st.session_state:
+    st.session_state.voice_text = None
+
+
+# ==================== VOICE RECOGNITION ====================
 def voice_input_component():
-    """Voice recognition for emergency report input"""
     voice_html = """
     <!DOCTYPE html>
     <html>
@@ -59,7 +121,6 @@ def voice_input_component():
                 padding: 10px 20px;
                 font-size: 14px;
                 cursor: pointer;
-                transition: all 0.3s ease;
                 width: 100%;
                 margin-top: 5px;
             }
@@ -77,7 +138,6 @@ def voice_input_component():
                 text-align: center;
                 margin-top: 5px;
                 font-size: 12px;
-                color: #666;
             }
         </style>
     </head>
@@ -101,7 +161,7 @@ def voice_input_component():
                     isRecording = true;
                     voiceBtn.classList.add('recording');
                     voiceBtn.innerHTML = '🔴 Recording... Speak now';
-                    statusDiv.innerHTML = '🎙️ Listening to your emergency...';
+                    statusDiv.innerHTML = '🎙️ Listening...';
                     statusDiv.style.color = '#ff4b2b';
                 };
                 
@@ -148,116 +208,10 @@ def voice_input_component():
     return st.components.v1.html(voice_html, height=80)
 
 
-# ==================== CUSTOM CSS ====================
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    * { font-family: 'Inter', sans-serif; }
-    
-    .stApp { background: linear-gradient(135deg, #1e3a5f 0%, #0f2b45 100%); }
-    
-    .main-header {
-        text-align: center;
-        color: white;
-        font-size: 2rem;
-        font-weight: 700;
-        margin-bottom: 0.5rem;
-    }
-    .sub-header {
-        text-align: center;
-        color: rgba(255,255,255,0.8);
-        margin-bottom: 2rem;
-    }
-    
-    .priority-critical { background: #dc2626; padding: 4px 12px; border-radius: 20px; color: white; display: inline-block; font-weight: bold; font-size: 12px; }
-    .priority-high { background: #f97316; padding: 4px 12px; border-radius: 20px; color: white; display: inline-block; font-weight: bold; font-size: 12px; }
-    .priority-medium { background: #eab308; padding: 4px 12px; border-radius: 20px; color: white; display: inline-block; font-weight: bold; font-size: 12px; }
-    .priority-low { background: #22c55e; padding: 4px 12px; border-radius: 20px; color: white; display: inline-block; font-weight: bold; font-size: 12px; }
-    
-    .stButton > button {
-        background: linear-gradient(135deg, #ff416c, #ff4b2b);
-        color: white;
-        border-radius: 40px;
-        font-weight: 600;
-    }
-    
-    .stMetric {
-        background: rgba(255,255,255,0.1);
-        border-radius: 16px;
-        padding: 10px;
-    }
-    
-    .stSidebar { background: rgba(0,0,0,0.3) !important; backdrop-filter: blur(10px); }
-    
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 0.5rem;
-        background: rgba(0,0,0,0.3);
-        border-radius: 50px;
-        padding: 0.5rem;
-    }
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 40px;
-        padding: 0.5rem 1.5rem;
-        color: rgba(255,255,255,0.7);
-    }
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #ff416c, #ff4b2b);
-        color: white;
-    }
-    
-    .login-container {
-        background: rgba(255,255,255,0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 20px;
-        padding: 2rem;
-        max-width: 400px;
-        margin: 0 auto;
-    }
-    
-    .route-info {
-        background: rgba(0,0,0,0.3);
-        border-radius: 10px;
-        padding: 8px;
-        margin-top: 8px;
-        font-size: 12px;
-    }
-    
-    .user-message {
-        background: linear-gradient(135deg, #667eea, #764ba2);
-        color: white;
-        padding: 10px 15px;
-        border-radius: 20px 20px 5px 20px;
-        max-width: 80%;
-        margin: 5px 0 5px auto;
-        text-align: right;
-    }
-    .bot-message {
-        background: #e5e7eb;
-        color: #1f2937;
-        padding: 10px 15px;
-        border-radius: 20px 20px 20px 5px;
-        max-width: 85%;
-        margin: 5px auto 5px 0;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-
-# ==================== SESSION STATE ====================
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-if 'user' not in st.session_state:
-    st.session_state.user = None
-if 'role' not in st.session_state:
-    st.session_state.role = None
-if 'voice_text' not in st.session_state:
-    st.session_state.voice_text = None
-
-
 # ==================== LOGIN PAGE ====================
 def show_login():
     st.markdown('<div class="main-header">🚨 SMART EMERGENCY RESPONSE SYSTEM</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">AI-Powered Emergency Dispatch for Pakistan | XLM-RoBERTa | Live Routing</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">AI-Powered Emergency Dispatch for Pakistan</div>', unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -315,11 +269,11 @@ def reporter_dashboard():
     with tab1:
         st.header("Report an Emergency")
         
-        # Voice recognition
+        # Voice input
         st.markdown("### 🎤 Voice Input")
         voice_input_component()
         
-        # Handle voice recognition
+        # Handle voice input
         voice_text = st.session_state.get('voice_text')
         if voice_text:
             try:
@@ -353,7 +307,7 @@ def reporter_dashboard():
                         pass
                 
                 description = st.text_area(
-                    "📝 Description (or speak above)",
+                    "📝 Description",
                     height=100,
                     placeholder="Describe the emergency...",
                     value=default_text
@@ -362,7 +316,7 @@ def reporter_dashboard():
             submitted = st.form_submit_button("🚨 Submit Report", use_container_width=True)
             
             if submitted and description.strip():
-                with st.spinner("🤖 XLM-RoBERTa analyzing emergency..."):
+                with st.spinner("🤖 Analyzing emergency..."):
                     category, confidence, probs = model.predict(description)
                     priority, level = priority_engine.score(category, description, confidence, time_of_day)
                     unit, eta, route, from_city, route_info = router.find_best_unit(city, category)
@@ -380,22 +334,20 @@ def reporter_dashboard():
                     col_b.metric("Priority", f"{priority}/100")
                     col_c.metric("Level", level)
                     col_d.metric("ETA", f"{int(eta)} min")
-                    
-                    if route_info and route_info.get("is_osrm"):
-                        st.info(f"📍 **OSRM Route:** {route_info['distance_km']:.1f} km via road network")
-                    else:
-                        st.info(f"📍 **Distance:** {route_info['distance_km']:.1f} km")
     
     # Tab 2: Emergency Map
     with tab2:
         st.header("Emergency Incident Map")
-        incidents = get_all_incidents()
-        units = router.get_unit_status()
-        if incidents:
-            map_obj = map_service.create_full_dashboard_map(incidents[:100], units, show_heatmap=True)
-            map_service.display_map(map_obj)
+        if MAP_AVAILABLE:
+            incidents = get_all_incidents()
+            units = router.get_unit_status()
+            if incidents:
+                map_obj = map_service.create_full_dashboard_map(incidents[:100], units, show_heatmap=True)
+                map_service.display_map(map_obj)
+            else:
+                st.info("No incidents to display")
         else:
-            st.info("No incidents to display")
+            st.info("🗺️ Map service loading... Please refresh.")
     
     # Tab 3: My Reports
     with tab3:
@@ -428,12 +380,10 @@ def operator_dashboard():
         pending = get_pending_incidents()
         if pending:
             for inc in pending:
-                badge = f'<span class="priority-{inc["level"].lower()}">{inc["level"].upper()}</span>'
                 with st.expander(f"#{inc['id']} - {inc['category']} | {inc['city']}", expanded=False):
-                    st.markdown(f"**Priority:** {badge} ({inc['priority']}/100)", unsafe_allow_html=True)
+                    st.write(f"**Priority:** {inc['level']} ({inc['priority']}/100)")
                     st.write(f"**Description:** {inc['description']}")
                     st.write(f"**Unit:** {inc['unit']} | **ETA:** {int(inc['eta'])} min")
-                    st.write(f"**Reported:** {inc['timestamp']} | **By:** {inc['reporter']}")
                     
                     col1, col2 = st.columns(2)
                     if col1.button(f"✅ Dispatch", key=f"disp_{inc['id']}"):
@@ -447,149 +397,70 @@ def operator_dashboard():
             st.success("✅ No pending incidents")
     
     with tab2:
-        incidents = get_all_incidents()
-        units = router.get_unit_status()
-        if incidents:
-            map_obj = map_service.create_full_dashboard_map(incidents[:100], units, show_heatmap=True)
-            map_service.display_map(map_obj)
+        if MAP_AVAILABLE:
+            incidents = get_all_incidents()
+            units = router.get_unit_status()
+            if incidents:
+                map_obj = map_service.create_full_dashboard_map(incidents[:100], units, show_heatmap=True)
+                map_service.display_map(map_obj)
+        else:
+            st.info("🗺️ Map loading...")
     
     with tab3:
         incidents = get_all_incidents()
         if incidents:
             df = pd.DataFrame(incidents)
             st.dataframe(df, use_container_width=True)
-            csv = df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 Export CSV", csv, "sers_incidents.csv", "text/csv")
 
 
 # ==================== ADMIN DASHBOARD ====================
 def admin_dashboard():
     st.markdown(f"### 👑 Welcome, {st.session_state.user['full_name']}")
-    st.markdown("*System Administration Dashboard*")
+    st.markdown("*System Administration*")
     
     stats = get_stats()
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Incidents", stats['total'])
+    col1.metric("Total", stats['total'])
     col2.metric("Pending", stats['pending'])
     col3.metric("Dispatched", stats['dispatched'])
     col4.metric("Resolved", stats['resolved'])
     
     st.markdown("---")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Analytics", "🗺️ National Map", "👥 User Management", "🚒 Unit Fleet"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Analytics", "🗺️ National Map", "👥 Users", "🚒 Units"])
     
     with tab1:
         incidents = get_all_incidents()
         if incidents:
             df = pd.DataFrame(incidents)
-            
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("Category Distribution")
-                fig = px.pie(values=df['category'].value_counts().values, 
-                           names=df['category'].value_counts().index,
-                           title="Incidents by Category",
-                           color_discrete_sequence=px.colors.sequential.Reds_r)
-                st.plotly_chart(fig, use_container_width=True)
-            
+                st.bar_chart(df['category'].value_counts())
             with col2:
-                st.subheader("Priority Level Distribution")
-                level_counts = df['level'].value_counts()
-                colors = {'Critical': '#dc2626', 'High': '#f97316', 'Medium': '#eab308', 'Low': '#22c55e'}
-                fig = px.bar(x=level_counts.index, y=level_counts.values, 
-                           title="Incidents by Priority",
-                           color=level_counts.index,
-                           color_discrete_map=colors)
-                st.plotly_chart(fig, use_container_width=True)
-            
-            st.subheader("Daily Incident Trend")
-            df['date'] = pd.to_datetime(df['timestamp']).dt.date
-            daily = df.groupby('date').size().reset_index(name='count')
-            fig = px.line(daily, x='date', y='count', title="Incidents Over Time", markers=True)
-            fig.update_traces(line_color='#ff4b2b', line_width=2)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            st.subheader("AI Model Info")
-            st.info("""
-            **XLM-RoBERTa Model**
-            - Accuracy: 90-97% for Urdu/English emergency detection
-            - Supports: English, Urdu, Romanized Urdu
-            - Fine-tuned on Pakistan emergency dataset
-            """)
-        else:
-            st.info("No data available")
+                st.subheader("Priority Level")
+                st.bar_chart(df['level'].value_counts())
     
     with tab2:
-        incidents = get_all_incidents()
-        units = router.get_unit_status()
-        if incidents:
-            map_obj = map_service.create_full_dashboard_map(incidents, units, show_heatmap=True, show_clusters=True)
-            map_service.display_map(map_obj)
+        if MAP_AVAILABLE:
+            incidents = get_all_incidents()
+            units = router.get_unit_status()
+            if incidents:
+                map_obj = map_service.create_full_dashboard_map(incidents, units, show_heatmap=True)
+                map_service.display_map(map_obj)
         else:
-            st.info("No incidents to display")
+            st.info("🗺️ Map loading...")
     
     with tab3:
-        st.subheader("User Management")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### Add New User")
-            with st.form("add_user_form"):
-                new_username = st.text_input("Username")
-                new_password = st.text_input("Password", type="password")
-                new_role = st.selectbox("Role", ["Reporter", "Operator", "Admin"])
-                new_fullname = st.text_input("Full Name")
-                new_phone = st.text_input("Phone")
-                
-                if st.form_submit_button("Add User", use_container_width=True):
-                    if create_user(new_username, new_password, new_role, new_fullname, new_phone):
-                        st.success(f"User {new_username} created!")
-                        st.rerun()
-                    else:
-                        st.error("Username already exists!")
-        
-        with col2:
-            st.markdown("#### Existing Users")
-            users = get_all_users()
-            if users:
-                df_users = pd.DataFrame(users)
-                st.dataframe(df_users, use_container_width=True)
-                
-                st.markdown("#### Delete User")
-                user_to_delete = st.selectbox(
-                    "Select User to Delete",
-                    [u['username'] for u in users if u['username'] not in ['admin', 'operator', 'reporter']]
-                )
-                if st.button("Delete User", use_container_width=True):
-                    user = next((u for u in users if u['username'] == user_to_delete), None)
-                    if user:
-                        delete_user(user['id'])
-                        st.success(f"User {user_to_delete} deleted!")
-                        st.rerun()
+        users = get_all_users()
+        if users:
+            st.dataframe(pd.DataFrame(users), use_container_width=True)
     
     with tab4:
-        st.subheader("Response Unit Fleet")
         units = router.get_unit_status()
         df_units = pd.DataFrame(units)
-        
-        available = df_units[df_units['available'] == True].shape[0]
-        deployed = df_units[df_units['available'] == False].shape[0]
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Units", len(units))
-        col2.metric("Available", available, delta="Ready")
-        col3.metric("Deployed", deployed, delta="On Mission")
-        
-        st.markdown("#### Units by Type")
-        type_counts = df_units['type'].value_counts()
-        fig = px.bar(x=type_counts.index, y=type_counts.values, title="Unit Distribution",
-                    color=type_counts.values, color_continuous_scale='Reds')
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.markdown("#### Unit Details")
         df_units['Status'] = df_units['available'].apply(lambda x: "✅ Available" if x else "🔴 Deployed")
-        st.dataframe(df_units[['id', 'type', 'city', 'Status']], use_container_width=True, hide_index=True)
+        st.dataframe(df_units[['id', 'type', 'city', 'Status']], use_container_width=True)
 
 
 # ==================== MAIN ====================
@@ -616,18 +487,6 @@ else:
         st.markdown('<span class="priority-low">LOW (0-39)</span>', unsafe_allow_html=True)
         
         st.markdown("---")
-        st.markdown("### 🤖 AI Features")
-        st.markdown("• XLM-RoBERTa model")
-        st.markdown("• Urdu/English support")
-        st.markdown("• 90-97% accuracy")
-        
-        st.markdown("---")
-        st.markdown("### 🗺️ Routing")
-        st.markdown("• OSRM road routing")
-        st.markdown("• Real-time ETA")
-        st.markdown("• Emergency priority")
-        
-        st.markdown("---")
         st.markdown("### 📞 Emergency")
         st.markdown("**1122** - Rescue")
         st.markdown("**15** - Police")
@@ -641,4 +500,4 @@ else:
         admin_dashboard()
     
     st.markdown("---")
-    st.markdown("<p style='text-align: center; color: rgba(255,255,255,0.5);'>SERS - XLM-RoBERTa | OSRM Routing | AI-Powered Emergency Dispatch for Pakistan</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: rgba(255,255,255,0.5);'>SERS - Smart Emergency Response System | AI-Powered Emergency Dispatch for Pakistan</p>", unsafe_allow_html=True)
